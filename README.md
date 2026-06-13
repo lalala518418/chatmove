@@ -25,12 +25,21 @@ python3 -m chatmove          # 或 python3 -m chatmove wizard
 ```
 **命令模式**：
 ```bash
-python3 -m chatmove platforms                      # 列出可用适配器
+python3 -m chatmove platforms                      # 列出可用适配器(本机探测到的)
 python3 -m chatmove list                           # 列出本机 Claude Code 会话
 python3 -m chatmove export <session_id> -o my.cmove   # 无损打包(会话+memory)
-# 到另一台机器:
-python3 -m chatmove import my.cmove --target-cwd /home/user/proj   # 解包+路径重映射
+# 到另一台机器(全自动定位，通常不用填路径):
+python3 -m chatmove import my.cmove
+#   程序自动把源路径里的"家目录前缀"换成本机家目录(/home/a/x -> /home/你/x)，
+#   放进本机 Claude 的位置。需要时才用 --target-cwd <path> 覆盖。
 ```
+
+## 全自动定位(本工具的核心体验)
+用户只选数字、不用 cd、不用敲路径：
+- **平台自动探测**：`detect()` 找出本机装了哪些平台(claude-code/cursor/codex…)，多个就让你选。
+- **位置自动甄别**：每个平台的存储位置由适配器按本机 `$HOME` 自动算(不同机器用户路径不同也能对)。
+- **路径自动重映射**：导入时把源机的家目录前缀换成本机的，会话自动落到正确项目目录。
+- **文件自动扫描**：导入向导自动扫 当前目录/下载/家目录 里的 `.cmove`，选编号即可。
 
 ## 跨系统一键分发（规划）
 目标：Windows/macOS/Linux 用户都能**一键启动**，无需装 Python。

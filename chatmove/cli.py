@@ -35,11 +35,8 @@ def cmd_export(args):
 
 
 def cmd_import(args):
-    # --target-cwd 不填就默认当前目录：cd 到想放的地方、直接 import 即可，不用手动找路径
-    target = args.target_cwd or os.getcwd()
-    if not args.target_cwd:
-        print(f"(未指定 --target-cwd，默认用当前目录: {target})")
-    get_adapter(args.platform).import_package(args.package, target_cwd=target)
+    # 不填 --target-cwd 时传 None：适配器自动把"源家目录前缀"换成本机家目录(全自动定位)
+    get_adapter(args.platform).import_package(args.package, target_cwd=args.target_cwd)
 
 
 def cmd_ir(args):
@@ -101,11 +98,11 @@ def _wizard_export():
     if not act:
         return print("已取消。")
     if act == "pkg":
-        default = f"{ref.id}.cmove"
-        out = input(f"输出文件名 [默认 {default}]: ").strip() or default
+        out = str(Path.home() / f"{ref.id}.cmove")   # 自动命名+存到家目录，不用用户敲
         a.export_package(ref.id, out)
-        print(f"\n✅ 完成。把 {out} 拷到目标机，运行 `chatmove import {out}`")
-        print("   （在目标机先 cd 到想放的项目目录，import 会默认放到当前目录，不用手填路径）")
+        print(f"\n✅ 完成，已存到: {out}")
+        print(f"   把它拷到目标机，运行 `chatmove import {Path(out).name}` 即可——")
+        print("   程序会自动找到目标机 Claude 的位置并放好(自动按本机家目录定位)，无需 cd/填路径。")
     else:
         conv = a.export_ir(ref.id)
         out = f"{ref.id}.ir.json"
@@ -113,14 +110,34 @@ def _wizard_export():
         print(f"\n✅ 已导出 IR -> {out}（{len(conv.messages)} 条消息）")
 
 
+def _find_cmove_files():
+    """自动扫常见位置的 .cmove，让用户选数字而不用敲路径。"""
+    from pathlib import Path
+    spots = [Path.cwd(), Path.home() / "Downloads", Path.home()]
+    seen, files = set(), []
+    for d in spots:
+        if d.is_dir():
+            for f in sorted(d.glob("*.cmove")):
+                if f.resolve() not in seen:
+                    seen.add(f.resolve()); files.append(f)
+    return files
+
+
 def _wizard_import():
-    pkg = input("要导入的 .cmove 文件路径: ").strip()
-    if not pkg or not os.path.isfile(pkg):
-        return print("文件不存在，已取消。")
-    cwd = os.getcwd()
-    t = input(f"放到哪个项目目录？[默认当前目录 {cwd}]: ").strip() or cwd
-    # 目前只有 claude-code 支持无损导入
-    ADAPTERS["claude-code"].import_package(pkg, target_cwd=t)
+    files = _find_cmove_files()
+    if files:
+        print("找到这些 .cmove 包，选一个导入：")
+        pick = _choose("选文件", [(str(f), f) for f in files])
+        if not pick:
+            return print("已取消。")
+        pkg = str(pick)
+    else:
+        print("(当前目录/下载/家目录没找到 .cmove)")
+        pkg = input("手动输入 .cmove 路径 (q 取消): ").strip()
+        if pkg.lower() == "q" or not os.path.isfile(pkg):
+            return print("已取消。")
+    # 全自动定位：target_cwd=None → 适配器按本机家目录自动重映射，无需用户填路径
+    ADAPTERS["claude-code"].import_package(pkg, target_cwd=None)
 
 
 def cmd_wizard(args):

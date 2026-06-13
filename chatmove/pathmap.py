@@ -27,6 +27,15 @@ def remap_line_cwd(line: str, old_cwd: str, new_cwd: str) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
+def remap_home(cwd: str, orig_home: str, new_home: str) -> str:
+    """把路径里的"源家目录前缀"换成本机家目录，实现跨机自动定位。
+    /home/a/fastlio  (orig_home=/home/a, new_home=/home/lalala) -> /home/lalala/fastlio
+    不同机器用户名/家目录不同时，这样会自动落到对应位置，无需用户手填。"""
+    if orig_home and cwd.startswith(orig_home):
+        return new_home + cwd[len(orig_home):]
+    return cwd  # 前缀对不上(非家目录下的项目)就原样保留
+
+
 def detect_cwd(lines: list[str]) -> str | None:
     """从会话 jsonl 中嗅探原始 cwd(取第一条带 cwd 的行)。"""
     for ln in lines:

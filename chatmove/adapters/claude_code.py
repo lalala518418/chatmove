@@ -8,7 +8,7 @@ import json, os, glob, time, tarfile, io, shutil
 from pathlib import Path
 from .base import Adapter, ConvRef
 from ..ir import Conversation, Message
-from ..pathmap import sanitize_cwd, remap_line_cwd, detect_cwd
+from ..pathmap import sanitize_cwd, remap_line_cwd, detect_cwd, remap_home
 
 PROJECTS = Path.home() / ".claude" / "projects"
 
@@ -93,7 +93,8 @@ class ClaudeCodeAdapter(Adapter):
         lines = f.read_text(encoding="utf-8").splitlines()
         cwd = detect_cwd(lines) or ""
         manifest = {"format": "chatmove/claude-code/1", "session_id": conv_id,
-                    "orig_cwd": cwd, "project_dir": f.parent.name}
+                    "orig_cwd": cwd, "orig_home": str(Path.home()),
+                    "project_dir": f.parent.name}
         with tarfile.open(out_path, "w:gz") as tar:
             # 会话 jsonl
             tar.add(f, arcname=f"{conv_id}.jsonl")
@@ -112,7 +113,9 @@ class ClaudeCodeAdapter(Adapter):
             manifest = json.loads(tar.extractfile("manifest.json").read())
             conv_id = manifest["session_id"]
             orig_cwd = manifest.get("orig_cwd", "")
-            new_cwd = target_cwd or orig_cwd
+            orig_home = manifest.get("orig_home", "")
+            # 全自动定位：没指定目标就把"源家目录前缀"换成本机家目录
+            new_cwd = target_cwd or remap_home(orig_cwd, orig_home, str(Path.home()))
             # 目标项目目录
             proj = PROJECTS / sanitize_cwd(new_cwd)
             proj.mkdir(parents=True, exist_ok=True)
