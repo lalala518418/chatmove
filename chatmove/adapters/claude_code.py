@@ -34,6 +34,9 @@ def _text_of(content) -> str:
 class ClaudeCodeAdapter(Adapter):
     name = "claude-code"
 
+    def detect(self) -> bool:
+        return PROJECTS.is_dir() and any(PROJECTS.glob("*/*.jsonl"))
+
     def _session_path(self, conv_id: str) -> Path:
         hits = list(PROJECTS.glob(f"*/{conv_id}.jsonl"))
         if not hits:

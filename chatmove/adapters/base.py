@@ -19,6 +19,10 @@ class ConvRef:
 class Adapter(ABC):
     name: str = "base"
 
+    def detect(self) -> bool:
+        """这个平台在本机是否存在(有没有它的数据目录)。用于向导自动探测，避免写死某个平台。"""
+        return True
+
     @abstractmethod
     def list_conversations(self) -> list[ConvRef]:
         """列出该平台本机的会话。"""
