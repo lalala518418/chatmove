@@ -19,6 +19,11 @@
 - ⬜ 计划：chatgpt(导出的 conversations.json)、claude.ai、cursor、其它 CLI agent…(欢迎贡献，见 `docs/adding-an-adapter.md`)
 
 ## 用法
+**一键模式（推荐给不熟命令行的人）**：直接运行，进交互向导，选对话→选操作→打包：
+```bash
+python3 -m chatmove          # 或 python3 -m chatmove wizard
+```
+**命令模式**：
 ```bash
 python3 -m chatmove platforms                      # 列出可用适配器
 python3 -m chatmove list                           # 列出本机 Claude Code 会话
@@ -26,6 +31,13 @@ python3 -m chatmove export <session_id> -o my.cmove   # 无损打包(会话+memo
 # 到另一台机器:
 python3 -m chatmove import my.cmove --target-cwd /home/user/proj   # 解包+路径重映射
 ```
+
+## 跨系统一键分发（规划）
+目标：Windows/macOS/Linux 用户都能**一键启动**，无需装 Python。
+- 因为是纯标准库，用 **PyInstaller** 可打包成单文件可执行：Windows `.exe`、macOS/Linux 二进制。
+- `build.sh`：在各目标系统上 `pyinstaller -F -n chatmove chatmove/__main__.py` 出对应平台的可执行(注意 PyInstaller 不能跨系统交叉打包，每个 OS 各出一个)。
+- 轻量备选：`run.sh`(Linux/Mac)、`run.bat`(Windows) 启动器，对已装 Python 的用户直接 `python -m chatmove`。
+- 双击/一键 → 向导列出对话 → 选对话 + 目标 → 生成包 → 拷到另一台机一键导入。
 
 ## 设计要点 / 已知坑
 - **路径重映射是灵魂**：会话目录名 = 项目绝对路径 `/`→`-`(`/home/a/fastlio`→`-home-a-fastlio`)，且 jsonl 内多处嵌 `cwd`。两机路径不同必须改写，否则 `--resume` 对不上。
