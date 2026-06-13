@@ -1,0 +1,36 @@
+# chatmove
+
+跨设备 · 跨平台的 AI 对话迁移工具。把一个会话从一台机器/一个平台**迁出(export)**，**迁入(import)**到另一台机器/另一个平台。
+
+> 起源：Claude Code 的对话存在每台机器本地(`~/.claude/projects/<项目路径名>/*.jsonl`)、不随账号云同步，换机器就丢上下文。chatmove 解决这个，并推广到多平台。
+
+## 两种迁移模式（核心设计）
+1. **同平台 · 无损搬运(lossless)**：原样搬运会话文件 + **重映射内嵌的绝对路径(cwd)**。保真、目标机可直接 `--resume` 续接。例：Jetson 的 Claude Code 会话 → 5080 台式机。
+2. **跨平台 · IR 转换**：把会话解析成统一中间表示(IR：role/content 序列)，再写成目标平台格式。有损(主要保文本)，但能在不同 AI 工具间搬。
+
+## 架构（适配器模式）
+```
+源平台 ──(adapter.export)──► [IR / 无损包] ──(adapter.import)──► 目标平台
+```
+每个平台一个 **adapter**，只需实现"读/写自己的格式"。N 个平台 = N 个适配器(不是 N² 种两两转换)，围绕一个 IR。
+
+## 适配器状态
+- ✅ **claude-code**：Claude Code CLI 本地会话(`~/.claude/projects/`)。支持 list / 无损 export+import(含路径重映射) / 导出到 IR。
+- ⬜ 计划：chatgpt(导出的 conversations.json)、claude.ai、cursor、其它 CLI agent…(欢迎贡献，见 `docs/adding-an-adapter.md`)
+
+## 用法
+```bash
+python3 -m chatmove platforms                      # 列出可用适配器
+python3 -m chatmove list                           # 列出本机 Claude Code 会话
+python3 -m chatmove export <session_id> -o my.cmove   # 无损打包(会话+memory)
+# 到另一台机器:
+python3 -m chatmove import my.cmove --target-cwd /home/user/proj   # 解包+路径重映射
+```
+
+## 设计要点 / 已知坑
+- **路径重映射是灵魂**：会话目录名 = 项目绝对路径 `/`→`-`(`/home/a/fastlio`→`-home-a-fastlio`)，且 jsonl 内多处嵌 `cwd`。两机路径不同必须改写，否则 `--resume` 对不上。
+- jsonl 格式随 Claude Code 版本可能变 → adapter 带 `version` 字段、做容错。
+- 纯 Python 标准库实现，无第三方依赖，`python3` 直接跑。
+
+## 状态
+早期 MVP 脚手架。先打通 claude-code 的无损同平台迁移，再扩跨平台。

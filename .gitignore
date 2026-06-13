@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.cmove
+build/
+dist/
+*.egg-info/

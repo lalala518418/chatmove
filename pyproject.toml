@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chatmove"
+version = "0.1.0"
+description = "跨设备/跨平台 AI 对话迁移工具 (Claude Code 等)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []   # 纯标准库
+
+[project.scripts]
+chatmove = "chatmove.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["chatmove*"]
