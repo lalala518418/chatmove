@@ -7,8 +7,10 @@ Claude Code 把会话存在 ~/.claude/projects/<项目路径名>/，其中目录
 
 跨系统要点（v0.2 修复）：
 - Linux 用 '/'、Windows 用 '\\' 和盘符 'C:'，不能只处理 '/'。
-- 目录名规则按本机 Claude Code 一致：逐字符把非 [A-Za-z0-9] 换成 '-'（不合并、
-  不改大小写）。例：C:\\Users\\you\\proj -> C--Users-you-proj，/home/a/proj -> -home-a-proj。
+- 目录名规则**对齐 Claude Code 自身**：把不属于 [A-Za-z0-9_-] 的字符换成 '-'，
+  即**保留下划线 '_' 和连字符 '-'**，其余(分隔符 / \\ :、点 . 等)逐字符变 '-'
+  （不合并、不改大小写）。Claude Code 源码里就是 `replace(/[^a-zA-Z0-9\\-_]/g,"-")`。
+  例：C:\\Users\\you\\my_proj -> C--Users-you-my_proj，/home/a/fast_lio -> -home-a-fast_lio。
 """
 from __future__ import annotations
 import json, os, re
@@ -16,11 +18,13 @@ import json, os, re
 
 def sanitize_cwd(cwd: str) -> str:
     """绝对路径 -> Claude Code 项目目录名（跨平台）。
-    逐字符把非字母数字替换为 '-'，与 Claude Code 自身一致：
-      /home/a/fastlio        -> -home-a-fastlio
-      C:\\Users\\you\\fastlio -> C--Users-you-fastlio
+    把非 [A-Za-z0-9_-] 的字符替换为 '-'，**保留下划线和连字符**，与 Claude Code 一致
+    (`replace(/[^a-zA-Z0-9\\-_]/g,"-")`)：
+      /home/a/fast_lio         -> -home-a-fast_lio
+      C:\\Users\\you\\my_proj   -> C--Users-you-my_proj
+    早期版本用了 [^A-Za-z0-9] 会把 '_' 也错改成 '-'，导致带下划线的项目 --resume 对不上。
     """
-    return re.sub(r"[^A-Za-z0-9]", "-", cwd)
+    return re.sub(r"[^A-Za-z0-9_-]", "-", cwd)
 
 
 def remap_path(path: str, orig_home: str, new_home: str) -> str:

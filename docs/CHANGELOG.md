@@ -1,5 +1,18 @@
 # 改动日志
 
+## v0.3.1 — 修复目录名把下划线错改成 '-'（带 '_' 的项目 --resume 对不上）
+
+**背景**：把一台 Mac（`/Users/aolos/Downloads/secret_subject`）的会话迁到 Windows，
+项目目录被建成 `C--Users-yunlong-Downloads-secret-subject`（下划线变成了 '-'），
+而 Claude Code 实际找的是 `...secret_subject`，于是 `--resume` 对不上、桌面端也错位。
+
+- **根因**：`sanitize_cwd` 用了 `[^A-Za-z0-9]→'-'`，把下划线也替换了。
+- **真相**：从本机 Claude Code 二进制里挖出它自己的编码器是
+  `replace(/[^a-zA-Z0-9\-_]/g, "-")` —— **保留下划线 '_' 和连字符 '-'**，其余才变 '-'。
+- **修复**：`sanitize_cwd` 改为 `[^A-Za-z0-9_-]→'-'`，与 Claude Code 完全一致。
+- 验证：Mac→Windows 带下划线路径 import 后，目录名为 `...secret_subject`，cwd 全部正确
+  重映射（非家目录下的路径如 `/private/tmp` 按设计保持不变），桌面端索引也正常生成。
+
 ## v0.3.0 — 桌面端 app 也能"看见"迁移的会话（跨 Win/macOS/Linux）
 
 **背景**：v0.2 修好后，CLI `claude --resume` 能续接，但 **Claude 桌面端 app 的
