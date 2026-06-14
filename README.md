@@ -52,6 +52,7 @@ python3 -m chatmove import my.cmove
 - **路径重映射是灵魂**：会话目录名 = 项目绝对路径 `/`→`-`(`/home/a/fastlio`→`-home-a-fastlio`)，且 jsonl 内多处嵌 `cwd`。两机路径不同必须改写，否则 `--resume` 对不上。
 - jsonl 格式随 Claude Code 版本可能变 → adapter 带 `version` 字段、做容错。
 - 纯 Python 标准库实现，无第三方依赖，`python3` 直接跑。
+- **CLI 与桌面 App 是两套独立存储**：`import` 写的是 CLI 的 `~/.claude/projects/`，`claude --resume` 能续接；但**桌面 App「Code」标签的 Recents 看不到**，它另有一套 `~/Library/Application Support/Claude/claude-code-sessions/.../local_<uuid>.json` 索引。详见 [`docs/claude-desktop-app-store.md`](docs/claude-desktop-app-store.md)(含结构、手动桥接步骤、App 适配 TODO)。
 
 ## 状态
 早期 MVP 脚手架。先打通 claude-code 的无损同平台迁移，再扩跨平台。
