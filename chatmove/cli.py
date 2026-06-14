@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 import argparse, time, os
+from pathlib import Path
 from .adapters import ADAPTERS, get_adapter, detected_adapters
 from .adapters.base import Adapter
 
@@ -112,7 +113,6 @@ def _wizard_export():
 
 def _find_cmove_files():
     """自动扫常见位置的 .cmove，让用户选数字而不用敲路径。"""
-    from pathlib import Path
     spots = [Path.cwd(), Path.home() / "Downloads", Path.home()]
     seen, files = set(), []
     for d in spots:
