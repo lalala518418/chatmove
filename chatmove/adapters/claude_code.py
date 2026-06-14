@@ -79,26 +79,49 @@ def _desktop_config_roots() -> list[Path]:
 
 
 def _find_desktop_session_dir():
-    """找已经存在 local_*.json 的会话目录(取最近活跃的那个)。
-    返回 (目录Path, [已有样本文件])；找不到(桌面端没装/没用过)返回 None。
-    不猜 accountId/workspaceId——直接复用 app 已建好的目录，最稳。"""
-    best = None
-    for root in _desktop_config_roots():
+    """定位桌面端会话索引目录 claude-code-sessions/<accountId>/<workspaceId>/。
+
+    选取优先级：① ownerAccountId 命中 > 其它 account；② 已有 local_*.json > 空目录；
+    ③ 最近修改。**不再要求目录里已有 local_*.json**——空的 workspace 目录也能定位，
+    这样即使桌面端刚把"活动会话"文件清掉、目录暂时为空也能补索引。
+
+    返回 (ws_path, files, None)；失败返回 (None, [], 原因字符串)，便于排查。
+    """
+    roots = _desktop_config_roots()
+    if not roots:
+        return None, [], "未找到 Claude 桌面端配置目录(可能没装桌面端)"
+    tried = []
+    best = None  # (score, ws, files)
+    for root in roots:
         base = root / "claude-code-sessions"
         if not base.is_dir():
+            tried.append(f"{base} 不存在")
             continue
-        for acc in base.iterdir():
-            if not acc.is_dir():
-                continue
-            for ws in acc.iterdir():
-                if not ws.is_dir():
-                    continue
+        owner = None
+        cf = root / "cowork-enabled-cli-ops.json"
+        if cf.is_file():
+            try:
+                owner = json.loads(cf.read_text(encoding="utf-8")).get("ownerAccountId")
+            except (OSError, json.JSONDecodeError):
+                pass
+        accs = [d for d in base.iterdir() if d.is_dir()]
+        if not accs:
+            tried.append(f"{base} 下无 account 目录")
+            continue
+        for acc in accs:
+            owner_match = 1 if acc.name == owner else 0
+            wss = [w for w in acc.iterdir() if w.is_dir()]
+            if not wss:
+                tried.append(f"{acc.name} 下无 workspace 目录")
+            for ws in wss:
                 files = list(ws.glob("local_*.json"))
-                if files:
-                    mtime = max(f.stat().st_mtime for f in files)
-                    if best is None or mtime > best[0]:
-                        best = (mtime, ws, files)
-    return (best[1], best[2]) if best else None
+                mtime = max((f.stat().st_mtime for f in files), default=ws.stat().st_mtime)
+                score = (owner_match, 1 if files else 0, mtime)
+                if best is None or score > best[0]:
+                    best = (score, ws, files)
+    if best is None:
+        return None, [], "；".join(tried) or "claude-code-sessions 下无可用 workspace 目录"
+    return best[1], best[2], None
 
 
 def _iso_to_ms(iso: str) -> int:
@@ -150,23 +173,23 @@ def _session_meta(lines):
     return title, created, last, turns
 
 
-def register_desktop_session(cli_id, cwd, title, created_ms, last_ms, turns) -> str | None:
+def register_desktop_session(cli_id, cwd, title, created_ms, last_ms, turns):
     """给桌面端 app 补一条会话索引，让迁移的会话出现在 Recents(而不只是 CLI --resume)。
-    已存在同 cliSessionId 的索引则不重复创建。桌面端没装/没用过则返回 None(跳过)。"""
-    found = _find_desktop_session_dir()
-    if not found:
-        return None
-    ws, files = found
+    已存在同 cliSessionId 的索引则不重复创建。
+    返回 (路径, None)；跳过时返回 (None, 原因)，原因会打印给用户便于排查。"""
+    ws, files, reason = _find_desktop_session_dir()
+    if ws is None:
+        return None, reason
     for f in files:                                  # 去重：已索引就别再建
         try:
             if json.loads(f.read_text(encoding="utf-8")).get("cliSessionId") == cli_id:
-                return str(f)
+                return str(f), None
         except (OSError, json.JSONDecodeError):
             pass
     entry = _build_desktop_entry(cli_id, cwd, title, created_ms, last_ms, turns)
     out = ws / (entry["sessionId"] + ".json")
     out.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
-    return str(out)
+    return str(out), None
 
 
 def _text_of(content) -> str:
@@ -289,8 +312,8 @@ class ClaudeCodeAdapter(Adapter):
         registered = register_project(new_cwd)
         # 从会话内容提取标题/时间/turn 数，给桌面端索引用
         title, created_ms, last_ms, turns = _session_meta(jl)
-        desktop = register_desktop_session(conv_id, new_cwd, title or conv_id,
-                                           created_ms, last_ms, turns)
+        desktop, desktop_reason = register_desktop_session(conv_id, new_cwd, title or conv_id,
+                                                           created_ms, last_ms, turns)
         print(f"已导入会话 {conv_id} -> {proj}")
         print(f"路径重映射: {orig_cwd or '(空)'} -> {new_cwd}")
         if registered:
@@ -301,6 +324,6 @@ class ClaudeCodeAdapter(Adapter):
         if desktop:
             print(f"已为桌面端 app 补会话索引(重启 app 后出现在 Recents)。")
         else:
-            print("(未发现桌面端 app 数据，跳过其索引；CLI `--resume` 不受影响。)")
+            print(f"(跳过桌面端索引：{desktop_reason}；CLI `--resume` 不受影响。)")
         print(f"在目标机 `cd {new_cwd} && claude --resume` 即可续接。")
         return conv_id

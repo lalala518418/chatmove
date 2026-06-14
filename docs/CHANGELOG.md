@@ -13,6 +13,16 @@
 - 验证：Mac→Windows 带下划线路径 import 后，目录名为 `...secret_subject`，cwd 全部正确
   重映射（非家目录下的路径如 `/private/tmp` 按设计保持不变），桌面端索引也正常生成。
 
+### 同版附带：桌面端索引检测加固
+- **现象**：有时 import 报"未发现桌面端 app 数据"，但目录其实存在。根因：桌面 app 会
+  把"活动会话"的 `local_*.json` 动态清掉，目录瞬时为空；旧检测要求"目录里已有 local 文件"
+  才认，空目录被跳过。
+- **修复**：`_find_desktop_session_dir` 不再要求已有 local 文件，改用
+  `cowork-enabled-cli-ops.json` 的 `ownerAccountId` + workspace 目录结构定位（空目录也行），
+  并在跳过时**打印具体原因**而非笼统的"未发现"，便于排查。
+- **已知局限(诚实告知)**：桌面 app 会主动清理它不认识的"孤儿"索引——注入的索引若在用户
+  点开前被 app 同步剪掉就会丢。CLI `claude --resume` 不受此影响，始终可用。
+
 ## v0.3.0 — 桌面端 app 也能"看见"迁移的会话（跨 Win/macOS/Linux）
 
 **背景**：v0.2 修好后，CLI `claude --resume` 能续接，但 **Claude 桌面端 app 的
