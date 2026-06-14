@@ -89,13 +89,13 @@ def _find_desktop_session_dir():
     """
     roots = _desktop_config_roots()
     if not roots:
-        return None, [], "未找到 Claude 桌面端配置目录(可能没装桌面端)"
+        return None, [], "no Claude desktop config dir found (desktop app may not be installed)"
     tried = []
     best = None  # (score, ws, files)
     for root in roots:
         base = root / "claude-code-sessions"
         if not base.is_dir():
-            tried.append(f"{base} 不存在")
+            tried.append(f"{base} does not exist")
             continue
         owner = None
         cf = root / "cowork-enabled-cli-ops.json"
@@ -106,13 +106,13 @@ def _find_desktop_session_dir():
                 pass
         accs = [d for d in base.iterdir() if d.is_dir()]
         if not accs:
-            tried.append(f"{base} 下无 account 目录")
+            tried.append(f"no account dir under {base}")
             continue
         for acc in accs:
             owner_match = 1 if acc.name == owner else 0
             wss = [w for w in acc.iterdir() if w.is_dir()]
             if not wss:
-                tried.append(f"{acc.name} 下无 workspace 目录")
+                tried.append(f"no workspace dir under {acc.name}")
             for ws in wss:
                 files = list(ws.glob("local_*.json"))
                 mtime = max((f.stat().st_mtime for f in files), default=ws.stat().st_mtime)
@@ -120,7 +120,7 @@ def _find_desktop_session_dir():
                 if best is None or score > best[0]:
                     best = (score, ws, files)
     if best is None:
-        return None, [], "；".join(tried) or "claude-code-sessions 下无可用 workspace 目录"
+        return None, [], "; ".join(tried) or "no usable workspace dir under claude-code-sessions"
     return best[1], best[2], None
 
 
@@ -219,7 +219,7 @@ class ClaudeCodeAdapter(Adapter):
     def _session_path(self, conv_id: str) -> Path:
         hits = list(PROJECTS.glob(f"*/{conv_id}.jsonl"))
         if not hits:
-            raise FileNotFoundError(f"找不到会话 {conv_id} (在 {PROJECTS})")
+            raise FileNotFoundError(f"session {conv_id} not found (in {PROJECTS})")
         return hits[0]
 
     def list_conversations(self) -> list[ConvRef]:
@@ -285,7 +285,7 @@ class ClaudeCodeAdapter(Adapter):
             mem = f.parent / "memory"
             if mem.is_dir():
                 tar.add(mem, arcname="memory")
-        print(f"已打包 -> {out_path} (orig_cwd={cwd})")
+        print(f"Packaged -> {out_path} (orig_cwd={cwd})")
 
     def import_package(self, pkg_path: str, target_cwd: str | None = None, **_) -> str:
         with tarfile.open(pkg_path, "r:gz") as tar:
@@ -314,16 +314,16 @@ class ClaudeCodeAdapter(Adapter):
         title, created_ms, last_ms, turns = _session_meta(jl)
         desktop, desktop_reason = register_desktop_session(conv_id, new_cwd, title or conv_id,
                                                            created_ms, last_ms, turns)
-        print(f"已导入会话 {conv_id} -> {proj}")
-        print(f"路径重映射: {orig_cwd or '(空)'} -> {new_cwd}")
+        print(f"Imported session {conv_id} -> {proj}")
+        print(f"Path remap: {orig_cwd or '(empty)'} -> {new_cwd}")
         if registered:
-            print(f"已登记项目到 {CLAUDE_JSON.name}，CLI/桌面端能识别该项目。")
+            print(f"Registered project in {CLAUDE_JSON.name}; CLI and desktop app can both see it.")
         else:
-            print(f"⚠ 未能登记到 {CLAUDE_JSON.name}(文件缺失或解析失败)，"
-                  f"会话可能不在列表里显示，但 `--resume` 仍可用。")
+            print(f"⚠ Could not register in {CLAUDE_JSON.name} (missing or unparseable); "
+                  f"the session may not show in lists, but `--resume` still works.")
         if desktop:
-            print(f"已为桌面端 app 补会话索引(重启 app 后出现在 Recents)。")
+            print(f"Added desktop-app session index (shows in Recents after an app restart).")
         else:
-            print(f"(跳过桌面端索引：{desktop_reason}；CLI `--resume` 不受影响。)")
-        print(f"在目标机 `cd {new_cwd} && claude --resume` 即可续接。")
+            print(f"(Skipped desktop index: {desktop_reason}; CLI `--resume` is unaffected.)")
+        print(f"On the target machine: `cd {new_cwd} && claude --resume` to continue.")
         return conv_id

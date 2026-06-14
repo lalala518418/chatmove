@@ -33,7 +33,7 @@ class Adapter(ABC):
 
     # 同平台无损迁移(可选实现)：直接打包/解包原始文件 + 路径重映射
     def export_package(self, conv_id: str, out_path: str) -> None:
-        raise NotImplementedError(f"{self.name} 暂不支持无损打包")
+        raise NotImplementedError(f"{self.name} does not support lossless packaging yet")
 
     def import_package(self, pkg_path: str, **target_opts) -> str:
-        raise NotImplementedError(f"{self.name} 暂不支持无损导入")
+        raise NotImplementedError(f"{self.name} does not support lossless import yet")

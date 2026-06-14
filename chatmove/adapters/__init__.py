@@ -6,7 +6,7 @@ ADAPTERS = {a.name: a for a in [ClaudeCodeAdapter(), CursorAdapter(), CodexAdapt
 
 def get_adapter(name: str):
     if name not in ADAPTERS:
-        raise SystemExit(f"未知平台 '{name}'. 可用: {', '.join(ADAPTERS)}")
+        raise SystemExit(f"unknown platform '{name}'. available: {', '.join(ADAPTERS)}")
     return ADAPTERS[name]
 
 

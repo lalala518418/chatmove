@@ -10,7 +10,7 @@ from pathlib import Path
 from .base import Adapter, ConvRef
 from ..ir import Conversation
 
-_TODO = "适配器开发中：{name} 的会话格式待实现。见 docs/adding-an-adapter.md，欢迎贡献。"
+_TODO = "adapter WIP: {name} session format not implemented yet. See docs/adding-an-adapter.md — contributions welcome."
 
 
 def _platform_dirs(linux, mac, win):
