@@ -1,0 +1,62 @@
+# 改动日志
+
+## v0.3.0 — 桌面端 app 也能"看见"迁移的会话（跨 Win/macOS/Linux）
+
+**背景**：v0.2 修好后，CLI `claude --resume` 能续接，但 **Claude 桌面端 app 的
+Recents 列表里还是看不到**迁移的会话。挖下去发现：
+
+- **桌面端 app 不扫 `~/.claude/projects/`**。它的会话列表读自己的索引文件：
+  `<配置根>/claude-code-sessions/<accountId>/<workspaceId>/local_<uuid>.json`，
+  每个文件一条会话，靠 `cliSessionId` 指回 projects 里的 jsonl。CLI 放进 projects/
+  的会话，桌面端因为没这条索引而不显示。
+
+### 修复：import 自动补桌面端索引
+- 新增 `register_desktop_session()`：import 时自动在桌面端的会话目录里生成一条
+  `local_*.json`（`cliSessionId` 指向迁入的会话、`cwd` 用重映射后的本机路径、
+  `lastFocusedAt` 设为当前时间好排在顶部）。重启 app 后即出现在 Recents。
+- **去重**：已存在同 `cliSessionId` 的索引则不重复创建。
+- **安全**：样本里的 `permissionMode:auto` + `chromePermissionMode:skip_all_permission_checks`
+  是"跳过所有权限确认"的后门，**新建索引绝不照抄**——用 `permissionMode:"default"`、
+  不写 chromePermissionMode。
+- **跨系统配置根**（`_desktop_config_roots`）：
+  - Windows：`%APPDATA%\Claude`
+  - macOS：`~/Library/Application Support/Claude`
+  - Linux：`~/.config/Claude`（或 `$XDG_CONFIG_HOME/Claude`）
+- 不猜 `accountId/workspaceId`，直接复用 app 已建好、且已有 `local_*.json` 的目录
+  （取最近活跃的那个），最稳。桌面端没装/没用过则跳过，不影响 CLI `--resume`。
+
+## v0.2.0 — 跨系统（Linux ↔ Windows）迁移修复
+
+**背景**：用 v0.1 把一台 Linux 机（`/home/a/fastlio`）的 Claude Code 会话导出成
+`.cmove`，拿到 Windows 上 `import`，会失败/放错位置，而且即使文件放对了，会话
+也不出现在 Claude Code 的 app/CLI 列表里。定位到三个根因，逐个修掉：
+
+### 1. 项目目录命名只支持 Linux（致命）
+- **问题**：`pathmap.sanitize_cwd` 只把 `/` 换成 `-`。但 Windows 上 Claude Code 的
+  项目目录名是把**盘符冒号 `:`、反斜杠 `\`、点 `.`** 等非字母数字字符都换成 `-`
+  （例：`C:\Users\you\Downloads` → `C--Users-you-Downloads`）。Linux 规则套到
+  Windows 会生成非法目录名，落不到正确位置。
+- **修复**：`sanitize_cwd` 改为逐字符把 `[^A-Za-z0-9]` 替换成 `-`，与本机 Claude Code
+  一致，三个平台通吃。
+
+### 2. 家目录重映射不转分隔符（致命）
+- **问题**：`remap_home` 直接字符串拼接 `new_home + tail`，把 Linux 的 `/home/a/fastlio`
+  映射成 `C:\Users\you/fastlio`（混合斜杠），路径无效。
+- **修复**：新增 `remap_path`：剥掉源家目录前缀后，按 `[/\\]` 拆成路径段，再用
+  `os.path.join` 以**本机分隔符**重组，跨系统双向都对。`remap_home` 保留为别名向后兼容。
+- 顺带：`import` 现在对 jsonl **每一行的 cwd** 都按家目录前缀重映射（之前只精确匹配
+  主 cwd），所以子目录 cwd（如 `.../FAST_LIO-main`）也能正确改写。
+
+### 3. 没登记到 `~/.claude.json`（会话"看不见"的真凶）
+- **问题**：会话 jsonl 放对了，但 Claude Code 的 app/CLI 靠 `~/.claude.json` 的
+  `projects` 表识别项目。没登记 → 会话不出现在列表/Recents 里，用户以为没迁成功。
+- **修复**：新增 `register_project(cwd)`，`import` 时自动把目标 cwd 写进 `projects` 表
+  （带 `hasTrustDialogAccepted: true`，免信任弹窗）；首次改动会留 `.chatmove-bak` 备份；
+  表缺失/解析失败则跳过并提示（不致命，`--resume` 仍可用）。
+
+### 4. 杂项 polish
+- `__main__.py`：Windows 控制台切 UTF-8，修中文输出乱码。
+- 解包 memory/ 增加 tar 路径穿越防护（`_safe_members`：拒绝绝对路径和 `..`）。
+
+**结论**：现在 `python -m chatmove import x.cmove` 在 Windows 上能一键自动完成
+Linux→Windows 的无损迁移并自动出现在列表里，无需手填路径。

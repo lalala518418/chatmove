@@ -4,13 +4,169 @@
 - 跨平台：export_ir 把 jsonl 解析成统一 IR。
 """
 from __future__ import annotations
-import json, os, glob, time, tarfile, io, shutil
+import json, os, sys, glob, time, uuid, datetime, tarfile, io, shutil
+from functools import partial
 from pathlib import Path
 from .base import Adapter, ConvRef
 from ..ir import Conversation, Message
-from ..pathmap import sanitize_cwd, remap_line_cwd, detect_cwd, remap_home
+from ..pathmap import sanitize_cwd, remap_line_cwd, detect_cwd, remap_path
 
 PROJECTS = Path.home() / ".claude" / "projects"
+CLAUDE_JSON = Path.home() / ".claude.json"   # Claude Code/桌面端的项目注册表
+
+
+def register_project(cwd: str) -> bool:
+    """把项目 cwd 登记进 ~/.claude.json 的 projects 表。
+
+    这是无损迁移能"被看见"的关键一步：会话 jsonl 放对了，但 Claude Code 的
+    app/CLI 靠这张表识别项目，没登记就不会出现在列表/Recents 里。
+    首次改动会在旁边留一份 .chatmove-bak 备份。表不存在/解析失败则跳过(返回 False)。
+    """
+    if not CLAUDE_JSON.is_file():
+        return False
+    try:
+        raw = CLAUDE_JSON.read_text(encoding="utf-8")
+        d = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return False
+    projects = d.setdefault("projects", {})
+    if cwd in projects:
+        return True
+    projects[cwd] = {
+        "allowedTools": [], "mcpContextUris": [],
+        "enabledMcpjsonServers": [], "disabledMcpjsonServers": [],
+        "hasTrustDialogAccepted": True, "projectOnboardingSeenCount": 0,
+        "hasClaudeMdExternalIncludesApproved": False,
+        "hasClaudeMdExternalIncludesWarningShown": False,
+    }
+    bak = CLAUDE_JSON.with_name(CLAUDE_JSON.name + ".chatmove-bak")
+    if not bak.exists():
+        bak.write_text(raw, encoding="utf-8")
+    CLAUDE_JSON.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
+def _safe_members(tar: tarfile.TarFile, prefix: str):
+    """只放行 prefix 下、且不含 '..'/绝对路径的成员，防 tar 路径穿越。"""
+    for m in tar.getmembers():
+        if not m.name.startswith(prefix):
+            continue
+        if os.path.isabs(m.name) or ".." in Path(m.name).parts:
+            continue
+        yield m
+
+
+# ---- Claude 桌面端(Electron app)会话索引 ----
+# 关键坑：CLI `claude --resume` 读 ~/.claude/projects/，但**桌面端 app 的 Recents
+# 列表不扫 projects/**，它读自己的索引文件：
+#   <配置根>/claude-code-sessions/<accountId>/<workspaceId>/local_<uuid>.json
+# 每个文件 = 一条会话，靠 cliSessionId 指回 projects 里的 jsonl。
+# 所以无损迁移要想在桌面端也"看得见"，得额外补一条这样的索引。跨系统配置根不同。
+
+def _desktop_config_roots() -> list[Path]:
+    """各 OS 下 Claude 桌面端的配置根目录(存在的才返回)。"""
+    home = Path.home()
+    roots = []
+    if sys.platform == "darwin":
+        roots.append(home / "Library" / "Application Support" / "Claude")
+    elif sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        roots.append(Path(appdata) / "Claude" if appdata else home / "AppData" / "Roaming" / "Claude")
+    else:  # linux / 其它 Electron 默认走 XDG
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        roots.append((Path(xdg) if xdg else home / ".config") / "Claude")
+    return [r for r in roots if r.is_dir()]
+
+
+def _find_desktop_session_dir():
+    """找已经存在 local_*.json 的会话目录(取最近活跃的那个)。
+    返回 (目录Path, [已有样本文件])；找不到(桌面端没装/没用过)返回 None。
+    不猜 accountId/workspaceId——直接复用 app 已建好的目录，最稳。"""
+    best = None
+    for root in _desktop_config_roots():
+        base = root / "claude-code-sessions"
+        if not base.is_dir():
+            continue
+        for acc in base.iterdir():
+            if not acc.is_dir():
+                continue
+            for ws in acc.iterdir():
+                if not ws.is_dir():
+                    continue
+                files = list(ws.glob("local_*.json"))
+                if files:
+                    mtime = max(f.stat().st_mtime for f in files)
+                    if best is None or mtime > best[0]:
+                        best = (mtime, ws, files)
+    return (best[1], best[2]) if best else None
+
+
+def _iso_to_ms(iso: str) -> int:
+    return int(datetime.datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() * 1000)
+
+
+def _build_desktop_entry(cli_id, cwd, title, created_ms, last_ms, turns, model="claude-opus-4-8"):
+    """构造一条桌面端会话索引(纯数据，便于测试)。
+    安全：permissionMode=default、不写 chromePermissionMode——绝不照抄样本里的
+    `skip_all_permission_checks`(那等于关掉所有权限确认/开后门)。"""
+    return {
+        "sessionId": "local_" + str(uuid.uuid4()),
+        "cliSessionId": cli_id,
+        "cwd": cwd, "originCwd": cwd,
+        "lastFocusedAt": int(time.time() * 1000),   # 设为现在 → 排在 Recents 顶部
+        "createdAt": created_ms, "lastActivityAt": last_ms,
+        "model": model, "effort": "high",
+        "isArchived": False,
+        "title": title, "titleSource": "user",
+        "permissionMode": "default",                # 安全默认，不跳过权限
+        "remoteMcpServersConfig": [],
+        "completedTurns": turns,
+        "alwaysAllowedReasons": [], "sessionPermissionUpdates": [],
+        "classifierSummaryEnabled": True, "spawnSeed": {},
+    }
+
+
+def _session_meta(lines):
+    """从 jsonl 行提取 (标题, createdAt_ms, lastActivityAt_ms, turn数)，供索引用。
+    标题取第一条非空 user 文本；时间取首/末带 timestamp 的记录；turn 数数 user 消息。"""
+    title, ts, turns = None, [], 0
+    for ln in lines:
+        try:
+            o = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(o, dict):
+            continue
+        if o.get("timestamp"):
+            ts.append(o["timestamp"])
+        if o.get("type") == "user" and isinstance(o.get("message"), dict):
+            turns += 1
+            if title is None:
+                t = _text_of(o["message"].get("content")).strip().replace("\n", " ")
+                if t:
+                    title = (t[:60] + "…") if len(t) > 60 else t
+    created = _iso_to_ms(ts[0]) if ts else int(time.time() * 1000)
+    last = _iso_to_ms(ts[-1]) if ts else created
+    return title, created, last, turns
+
+
+def register_desktop_session(cli_id, cwd, title, created_ms, last_ms, turns) -> str | None:
+    """给桌面端 app 补一条会话索引，让迁移的会话出现在 Recents(而不只是 CLI --resume)。
+    已存在同 cliSessionId 的索引则不重复创建。桌面端没装/没用过则返回 None(跳过)。"""
+    found = _find_desktop_session_dir()
+    if not found:
+        return None
+    ws, files = found
+    for f in files:                                  # 去重：已索引就别再建
+        try:
+            if json.loads(f.read_text(encoding="utf-8")).get("cliSessionId") == cli_id:
+                return str(f)
+        except (OSError, json.JSONDecodeError):
+            pass
+    entry = _build_desktop_entry(cli_id, cwd, title, created_ms, last_ms, turns)
+    out = ws / (entry["sessionId"] + ".json")
+    out.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(out)
 
 
 def _text_of(content) -> str:
@@ -114,22 +270,37 @@ class ClaudeCodeAdapter(Adapter):
             conv_id = manifest["session_id"]
             orig_cwd = manifest.get("orig_cwd", "")
             orig_home = manifest.get("orig_home", "")
-            # 全自动定位：没指定目标就把"源家目录前缀"换成本机家目录
-            new_cwd = target_cwd or remap_home(orig_cwd, orig_home, str(Path.home()))
-            # 目标项目目录
+            new_home = str(Path.home())
+            # 全自动定位：没指定目标就把"源家目录前缀"换成本机家目录(跨系统会转分隔符)
+            new_cwd = target_cwd or remap_path(orig_cwd, orig_home, new_home)
+            # 目标项目目录(跨平台 sanitize：/ \\ : 等都 -> '-')
             proj = PROJECTS / sanitize_cwd(new_cwd)
             proj.mkdir(parents=True, exist_ok=True)
-            # 写 jsonl + 路径重映射
+            # 写 jsonl + 路径重映射：对每一行的 cwd 统一按家目录前缀重映射，
+            # 这样主目录和子目录(如 .../FAST_LIO-main)的 cwd 都能正确改写。
+            remap = partial(remap_path, orig_home=orig_home, new_home=new_home)
             jl = tar.extractfile(f"{conv_id}.jsonl").read().decode("utf-8").splitlines()
-            out = "\n".join(remap_line_cwd(ln, orig_cwd, new_cwd) for ln in jl) + "\n"
+            out = "\n".join(remap_line_cwd(ln, remap) for ln in jl) + "\n"
             (proj / f"{conv_id}.jsonl").write_text(out, encoding="utf-8")
-            # memory(若有)
-            members = [m for m in tar.getmembers() if m.name.startswith("memory/")]
-            for m in members:
-                m.name = m.name  # 解到 proj 下
+            # memory(若有)，带路径穿越防护
+            members = list(_safe_members(tar, "memory/"))
             if members:
                 tar.extractall(path=proj, members=members)
+        registered = register_project(new_cwd)
+        # 从会话内容提取标题/时间/turn 数，给桌面端索引用
+        title, created_ms, last_ms, turns = _session_meta(jl)
+        desktop = register_desktop_session(conv_id, new_cwd, title or conv_id,
+                                           created_ms, last_ms, turns)
         print(f"已导入会话 {conv_id} -> {proj}")
         print(f"路径重映射: {orig_cwd or '(空)'} -> {new_cwd}")
+        if registered:
+            print(f"已登记项目到 {CLAUDE_JSON.name}，CLI/桌面端能识别该项目。")
+        else:
+            print(f"⚠ 未能登记到 {CLAUDE_JSON.name}(文件缺失或解析失败)，"
+                  f"会话可能不在列表里显示，但 `--resume` 仍可用。")
+        if desktop:
+            print(f"已为桌面端 app 补会话索引(重启 app 后出现在 Recents)。")
+        else:
+            print("(未发现桌面端 app 数据，跳过其索引；CLI `--resume` 不受影响。)")
         print(f"在目标机 `cd {new_cwd} && claude --resume` 即可续接。")
         return conv_id

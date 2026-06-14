@@ -1,39 +1,59 @@
 """路径重映射工具——chatmove 的灵魂。
 
-Claude Code 把会话存在 ~/.claude/projects/<项目路径名>/，其中目录名是
-项目绝对路径把 '/' 换成 '-'。会话 jsonl 内部也多处嵌入 cwd 绝对路径。
-跨机迁移时，若项目在目标机路径不同，必须把这些路径改写，否则 --resume 对不上。
+Claude Code 把会话存在 ~/.claude/projects/<项目路径名>/，其中目录名是把
+项目绝对路径里的非字母数字字符都换成 '-'（不同操作系统的分隔符 / \\ : 都算）。
+会话 jsonl 内部也多处嵌入 cwd 绝对路径。跨机/跨系统迁移时，若项目在目标机
+路径不同，必须把这些路径改写，否则 --resume 对不上。
+
+跨系统要点（v0.2 修复）：
+- Linux 用 '/'、Windows 用 '\\' 和盘符 'C:'，不能只处理 '/'。
+- 目录名规则按本机 Claude Code 一致：逐字符把非 [A-Za-z0-9] 换成 '-'（不合并、
+  不改大小写）。例：C:\\Users\\you\\proj -> C--Users-you-proj，/home/a/proj -> -home-a-proj。
 """
 from __future__ import annotations
-import json
+import json, os, re
 
 
 def sanitize_cwd(cwd: str) -> str:
-    """绝对路径 -> Claude Code 项目目录名。/home/a/fastlio -> -home-a-fastlio"""
-    return cwd.replace("/", "-")
+    """绝对路径 -> Claude Code 项目目录名（跨平台）。
+    逐字符把非字母数字替换为 '-'，与 Claude Code 自身一致：
+      /home/a/fastlio        -> -home-a-fastlio
+      C:\\Users\\you\\fastlio -> C--Users-you-fastlio
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", cwd)
 
 
-def remap_line_cwd(line: str, old_cwd: str, new_cwd: str) -> str:
-    """把一行 jsonl 里的 cwd 字段从 old_cwd 改成 new_cwd(保留其它内容不变)。
+def remap_path(path: str, orig_home: str, new_home: str) -> str:
+    """把路径里的"源家目录前缀"换成本机家目录，并把分隔符转成本机风格。
+    跨系统也对：/home/a/fastlio (orig_home=/home/a) 在 Windows 上 ->
+    C:\\Users\\you\\fastlio；反向亦然。
+    前缀对不上（非家目录下的项目）就原样返回。
+    """
+    if orig_home and path.startswith(orig_home):
+        tail = path[len(orig_home):]                  # 形如 /fastlio 或 \\fastlio\\sub
+        rel = [p for p in re.split(r"[/\\]+", tail) if p]
+        return os.path.join(new_home, *rel) if rel else new_home
+    return path
+
+
+# 向后兼容旧名字（旧代码/测试里叫 remap_home）
+remap_home = remap_path
+
+
+def remap_line_cwd(line: str, remap) -> str:
+    """把一行 jsonl 里的 'cwd' 字段用 remap(old)->new 改写（保留其它内容不变）。
 
     只改结构化的 'cwd' 键，避免误伤正文里碰巧出现的路径字符串。
+    remap 通常是 functools.partial(remap_path, orig_home=..., new_home=...)，
+    对不在家目录下的 cwd 会原样返回，因此能安全地对每一行无脑调用。
     """
     try:
         obj = json.loads(line)
     except json.JSONDecodeError:
         return line  # 非 JSON 行原样返回
-    if isinstance(obj, dict) and obj.get("cwd") == old_cwd:
-        obj["cwd"] = new_cwd
+    if isinstance(obj, dict) and isinstance(obj.get("cwd"), str):
+        obj["cwd"] = remap(obj["cwd"])
     return json.dumps(obj, ensure_ascii=False)
-
-
-def remap_home(cwd: str, orig_home: str, new_home: str) -> str:
-    """把路径里的"源家目录前缀"换成本机家目录，实现跨机自动定位。
-    /home/a/fastlio  (orig_home=/home/a, new_home=/home/lalala) -> /home/lalala/fastlio
-    不同机器用户名/家目录不同时，这样会自动落到对应位置，无需用户手填。"""
-    if orig_home and cwd.startswith(orig_home):
-        return new_home + cwd[len(orig_home):]
-    return cwd  # 前缀对不上(非家目录下的项目)就原样保留
 
 
 def detect_cwd(lines: list[str]) -> str | None:

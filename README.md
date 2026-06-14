@@ -15,7 +15,7 @@
 每个平台一个 **adapter**，只需实现"读/写自己的格式"。N 个平台 = N 个适配器(不是 N² 种两两转换)，围绕一个 IR。
 
 ## 适配器状态
-- ✅ **claude-code**：Claude Code CLI 本地会话(`~/.claude/projects/`)。支持 list / 无损 export+import(含路径重映射) / 导出到 IR。
+- ✅ **claude-code**：Claude Code CLI 本地会话(`~/.claude/projects/`)。支持 list / 无损 export+import(含路径重映射) / 导出到 IR。**跨系统(Linux↔Windows)已支持**：自动转分隔符、按本机规则生成项目目录名、并登记到 `~/.claude.json` 让会话出现在 app/CLI 列表(见 `docs/CHANGELOG.md` v0.2)。
 - ⬜ 计划：chatgpt(导出的 conversations.json)、claude.ai、cursor、其它 CLI agent…(欢迎贡献，见 `docs/adding-an-adapter.md`)
 
 ## 用法
@@ -49,7 +49,9 @@ python3 -m chatmove import my.cmove
 - 双击/一键 → 向导列出对话 → 选对话 + 目标 → 生成包 → 拷到另一台机一键导入。
 
 ## 设计要点 / 已知坑
-- **路径重映射是灵魂**：会话目录名 = 项目绝对路径 `/`→`-`(`/home/a/fastlio`→`-home-a-fastlio`)，且 jsonl 内多处嵌 `cwd`。两机路径不同必须改写，否则 `--resume` 对不上。
+- **路径重映射是灵魂**：会话目录名 = 项目绝对路径里非字母数字字符全 →`-`(Linux `/home/a/fastlio`→`-home-a-fastlio`；Windows `C:\Users\you\fastlio`→`C--Users-you-fastlio`)，且 jsonl 内多处嵌 `cwd`。两机/两系统路径不同必须改写，否则 `--resume` 对不上。
+- **必须登记 `~/.claude.json`**：光把 jsonl 放进 `projects/` 不够——app/CLI 靠 `~/.claude.json` 的 `projects` 表识别项目，`import` 会自动登记(带备份)，否则会话不出现在列表里。
+- **桌面端 app 另有一套索引**：Claude 桌面端 Recents **不扫 `projects/`**，而读 `<配置根>/claude-code-sessions/<acct>/<ws>/local_*.json`(配置根：Win `%APPDATA%\Claude`、mac `~/Library/Application Support/Claude`、Linux `~/.config/Claude`)。`import` 会自动补这条索引(安全权限默认值，不带后门)，重启 app 后即出现。详见 `docs/CHANGELOG.md` v0.3。
 - jsonl 格式随 Claude Code 版本可能变 → adapter 带 `version` 字段、做容错。
 - 纯 Python 标准库实现，无第三方依赖，`python3` 直接跑。
 - **CLI 与桌面 App 是两套独立存储**：`import` 写的是 CLI 的 `~/.claude/projects/`，`claude --resume` 能续接；但**桌面 App「Code」标签的 Recents 看不到**，它另有一套 `~/Library/Application Support/Claude/claude-code-sessions/.../local_<uuid>.json` 索引。详见 [`docs/claude-desktop-app-store.md`](docs/claude-desktop-app-store.md)(含结构、手动桥接步骤、App 适配 TODO)。
