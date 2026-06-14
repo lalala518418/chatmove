@@ -4,11 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chatmove"
-version = "0.1.0"
-description = "跨设备/跨平台 AI 对话迁移工具 (Claude Code 等)"
+version = "0.3.1"
+description = "Move AI chat sessions across machines and platforms (Claude Code, etc.) — pure stdlib."
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = []   # 纯标准库
+dependencies = []                      # pure standard library, no third-party deps
+authors = [{ name = "aolos" }]
+keywords = ["claude", "claude-code", "chat", "session", "migration", "backup", "cross-platform"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/lalala518418/chatmove"
+Repository = "https://github.com/lalala518418/chatmove"
+Changelog = "https://github.com/lalala518418/chatmove/blob/main/docs/CHANGELOG.md"
 
 [project.scripts]
 chatmove = "chatmove.cli:main"

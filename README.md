@@ -1,60 +1,74 @@
 # chatmove
 
-跨设备 · 跨平台的 AI 对话迁移工具。把一个会话从一台机器/一个平台**迁出(export)**，**迁入(import)**到另一台机器/另一个平台。
+> Move your AI chat sessions across machines and platforms — **export** on one box, **import** on another, and pick up exactly where you left off.
 
-> 起源：Claude Code 的对话存在每台机器本地(`~/.claude/projects/<项目路径名>/*.jsonl`)、不随账号云同步，换机器就丢上下文。chatmove 解决这个，并推广到多平台。
+**English** · [中文](README.zh-CN.md)
 
-## 两种迁移模式（核心设计）
-1. **同平台 · 无损搬运(lossless)**：原样搬运会话文件 + **重映射内嵌的绝对路径(cwd)**。保真、目标机可直接 `--resume` 续接。例：Jetson 的 Claude Code 会话 → 5080 台式机。
-2. **跨平台 · IR 转换**：把会话解析成统一中间表示(IR：role/content 序列)，再写成目标平台格式。有损(主要保文本)，但能在不同 AI 工具间搬。
+**The problem.** Claude Code stores every conversation locally (`~/.claude/projects/<dir>/*.jsonl`) and never syncs it to your account. Switch laptops — or move from a Linux box to a Mac — and all that context is gone. **chatmove** packs a session (plus its project memory) into a single `.cmove` file, then unpacks it on the target machine, rewriting the embedded absolute paths so `claude --resume` just works.
 
-## 架构（适配器模式）
-```
-源平台 ──(adapter.export)──► [IR / 无损包] ──(adapter.import)──► 目标平台
-```
-每个平台一个 **adapter**，只需实现"读/写自己的格式"。N 个平台 = N 个适配器(不是 N² 种两两转换)，围绕一个 IR。
+## Features
+- **One-command wizard** — run `chatmove`, pick a number, done. No flags, no paths to type.
+- **Lossless same-tool migration** — copies the raw session files and remaps every embedded `cwd`, so the target machine can `--resume` with full context intact.
+- **Cross-OS** — Linux ⇄ macOS ⇄ Windows. Path separators, drive letters and the project-dir naming rule are translated to the target OS automatically.
+- **Auto-locate & auto-register** — finds the local Claude store by `$HOME`, registers the project in `~/.claude.json`, and (best-effort) adds the desktop-app index so the session appears in **both** the CLI and the desktop app.
+- **Pure standard library** — zero third-party dependencies. If you have Python 3.9+, it runs.
+- **Adapter architecture** — one adapter per platform around a shared IR. N platforms = N adapters, not N² converters.
 
-## 适配器状态
-- ✅ **claude-code**：Claude Code CLI 本地会话(`~/.claude/projects/`)。支持 list / 无损 export+import(含路径重映射) / 导出到 IR。**跨系统(Linux↔Windows)已支持**：自动转分隔符、按本机规则生成项目目录名、并登记到 `~/.claude.json` 让会话出现在 app/CLI 列表(见 `docs/CHANGELOG.md` v0.2)。
-- ⬜ 计划：chatgpt(导出的 conversations.json)、claude.ai、cursor、其它 CLI agent…(欢迎贡献，见 `docs/adding-an-adapter.md`)
-
-## 用法
-**一键模式（推荐给不熟命令行的人）**：直接运行，进交互向导，选对话→选操作→打包：
+## Install
 ```bash
-python3 -m chatmove          # 或 python3 -m chatmove wizard
+# Option A — install the `chatmove` command
+pip install git+https://github.com/lalala518418/chatmove.git
+
+# Option B — run straight from a clone (no install needed, it's pure stdlib)
+git clone https://github.com/lalala518418/chatmove.git
+cd chatmove
+python  -m chatmove     # Windows
+python3 -m chatmove     # macOS / Linux
 ```
-**命令模式**：
+
+## Quick start — one command
+Run it and follow the numbered prompts (export ⇆ import → platform → conversation):
 ```bash
-python3 -m chatmove platforms                      # 列出可用适配器(本机探测到的)
-python3 -m chatmove list                           # 列出本机 Claude Code 会话
-python3 -m chatmove export <session_id> -o my.cmove   # 无损打包(会话+memory)
-# 到另一台机器(全自动定位，通常不用填路径):
-python3 -m chatmove import my.cmove
-#   程序自动把源路径里的"家目录前缀"换成本机家目录(/home/a/x -> /home/你/x)，
-#   放进本机 Claude 的位置。需要时才用 --target-cwd <path> 覆盖。
+chatmove                # or:  python -m chatmove
 ```
 
-## 全自动定位(本工具的核心体验)
-用户只选数字、不用 cd、不用敲路径：
-- **平台自动探测**：`detect()` 找出本机装了哪些平台(claude-code/cursor/codex…)，多个就让你选。
-- **位置自动甄别**：每个平台的存储位置由适配器按本机 `$HOME` 自动算(不同机器用户路径不同也能对)。
-- **路径自动重映射**：导入时把源机的家目录前缀换成本机的，会话自动落到正确项目目录。
-- **文件自动扫描**：导入向导自动扫 当前目录/下载/家目录 里的 `.cmove`，选编号即可。
+**Move a session from machine A to machine B:**
+1. On **A**:  `chatmove` → **export** → pick the conversation → it writes `~/<id>.cmove`.
+2. Copy that `.cmove` to **B** (AirDrop / USB / scp / cloud).
+3. On **B**:  `chatmove` → **import** → pick the file. Everything else is automatic.
+4. Resume:  `cd <printed path> && claude --resume`  — or just open the Claude desktop app.
 
-## 跨系统一键分发（规划）
-目标：Windows/macOS/Linux 用户都能**一键启动**，无需装 Python。
-- 因为是纯标准库，用 **PyInstaller** 可打包成单文件可执行：Windows `.exe`、macOS/Linux 二进制。
-- `build.sh`：在各目标系统上 `pyinstaller -F -n chatmove chatmove/__main__.py` 出对应平台的可执行(注意 PyInstaller 不能跨系统交叉打包，每个 OS 各出一个)。
-- 轻量备选：`run.sh`(Linux/Mac)、`run.bat`(Windows) 启动器，对已装 Python 的用户直接 `python -m chatmove`。
-- 双击/一键 → 向导列出对话 → 选对话 + 目标 → 生成包 → 拷到另一台机一键导入。
+## Command-line reference
+```bash
+chatmove platforms                          # list platforms detected on this machine
+chatmove list                               # list local Claude Code sessions
+chatmove export <session_id> -o my.cmove    # lossless package (session + memory)
+chatmove import my.cmove                     # auto-locate + path-remap + register
+chatmove import my.cmove --target-cwd <path> # override the target project path
+chatmove ir <session_id>                     # dump the cross-platform IR (text preview)
+```
+`python -m chatmove ...` works identically if you didn't `pip install`.
 
-## 设计要点 / 已知坑
-- **路径重映射是灵魂**：会话目录名 = 项目绝对路径里非字母数字字符全 →`-`(Linux `/home/a/fastlio`→`-home-a-fastlio`；Windows `C:\Users\you\fastlio`→`C--Users-you-fastlio`)，且 jsonl 内多处嵌 `cwd`。两机/两系统路径不同必须改写，否则 `--resume` 对不上。
-- **必须登记 `~/.claude.json`**：光把 jsonl 放进 `projects/` 不够——app/CLI 靠 `~/.claude.json` 的 `projects` 表识别项目，`import` 会自动登记(带备份)，否则会话不出现在列表里。
-- **桌面端 app 另有一套索引**：Claude 桌面端 Recents **不扫 `projects/`**，而读 `<配置根>/claude-code-sessions/<acct>/<ws>/local_*.json`(配置根：Win `%APPDATA%\Claude`、mac `~/Library/Application Support/Claude`、Linux `~/.config/Claude`)。`import` 会自动补这条索引(安全权限默认值，不带后门)，重启 app 后即出现。详见 `docs/CHANGELOG.md` v0.3。
-- jsonl 格式随 Claude Code 版本可能变 → adapter 带 `version` 字段、做容错。
-- 纯 Python 标准库实现，无第三方依赖，`python3` 直接跑。
-- **CLI 与桌面 App 是两套独立存储**：`import` 写的是 CLI 的 `~/.claude/projects/`，`claude --resume` 能续接；但**桌面 App「Code」标签的 Recents 看不到**，它另有一套 `~/Library/Application Support/Claude/claude-code-sessions/.../local_<uuid>.json` 索引。详见 [`docs/claude-desktop-app-store.md`](docs/claude-desktop-app-store.md)(含结构、手动桥接步骤、App 适配 TODO)。
+## How it works
+```
+source platform ──(adapter.export)──► [ .cmove / IR ] ──(adapter.import)──► target platform
+```
+- **Path remap is the heart of it.** A session's project dir is its absolute path with every char outside `[A-Za-z0-9_-]` turned into `-` (`/home/a/fast_lio` → `-home-a-fast_lio`; `C:\Users\you\fast_lio` → `C--Users-you-fast_lio`), and the `cwd` is embedded throughout the `.jsonl`. On import, chatmove swaps the source home-prefix for the local one and converts separators, so the dir name **and** every `cwd` line match what the target Claude expects — that's what makes `--resume` line up.
+- **Two stores, both handled.** The **CLI** reads `~/.claude/projects/`; the **desktop app** reads its own `claude-code-sessions/.../local_*.json` index. `import` writes the first, registers the project in `~/.claude.json`, and (best-effort) adds the second.
 
-## 状态
-早期 MVP 脚手架。先打通 claude-code 的无损同平台迁移，再扩跨平台。
+## Adapter status
+| Platform | Status | Notes |
+|---|---|---|
+| **claude-code** | ✅ | list · lossless export+import (cross-OS path remap) · IR export |
+| chatgpt · claude.ai · cursor · codex · … | ⬜ planned | scaffolding ready — see [`docs/adding-an-adapter.md`](docs/adding-an-adapter.md) |
+
+## Caveats (honest)
+- **CLI `--resume` is the reliable path.** It reads `~/.claude/projects/` directly; after import it always works.
+- **Desktop-app visibility is best-effort.** The app manages its own session index and may prune entries it doesn't recognise. If the imported session appears in *Recents* after a restart, open it once to make it stick; otherwise fall back to the CLI.
+- The `.jsonl` format can change between Claude Code versions — adapters carry a `version` field and degrade gracefully.
+
+## Contributing
+Adding a platform = writing **one** adapter (read/write its native format) around the shared IR. See [`docs/adding-an-adapter.md`](docs/adding-an-adapter.md). Full history in [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+
+## Status
+Early but working: lossless cross-machine **and cross-OS** migration for Claude Code is solid. Cross-*platform* (between different AI tools) via the IR is the next frontier.
